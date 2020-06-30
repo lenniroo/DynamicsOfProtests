@@ -1,0 +1,146 @@
+---
+title: "protest_sem_termpaper"
+author: "Lennart Roesemeier"
+date: "June 24, 2020"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(foreign)
+library(sandwich)
+library(msm)
+library(AER)
+library(ggstance)
+library(broom.mixed)
+```
+
+```{r}
+# Loading the Dynamics of Collective Action dataset (USA only, democratic ´, from 1955 to 1995)
+dca <- read.dta("C://Users//Lennart//Documents//Studium//master_sociology//protest_sem//newsworthiness//Dynamic of Collective Action Dataset//final_data_v10.dta", convert.dates = T)
+
+# Remove redundant variables
+dca <- dca %>%
+  select(partices, viold, violtype, propdam, police3, police4, stories, counterd) %>%
+  replace_na(list(violtype = 0, partices = 0, counterd = 0, propdam = 0, injury = 0, police3 = 0, police4 = 0))
+
+
+# Loading the Mass Mobilization in autocracies Database by Hellmeier et al. 2019
+mmadrep <- read.csv("C://Users//Lennart//Documents//Studium//master_sociology//protest_sem//newsworthiness//MMAD//reports.csv", header = T)
+mmadevn <- read.csv("C://Users//Lennart//Documents//Studium//master_sociology//protest_sem//newsworthiness//MMAD//events.csv", header = T)
+
+mmadrep <- mmadrep %>%
+  select(asciiname, event_date, part_violence, sec_engagement, avg_numparticipants)
+
+mmadevn <- mmadevn %>%
+  select(asciiname, event_date, numreports, max_partviolence, max_secengagement)
+
+# Bind both mmad sets with violence and report variables, remove duplicate rows -> over 1 million observations: wherefrom?
+mmad <- mmadrep %>%
+  full_join(mmadevn, by = "event_date") %>% 
+  distinct()
+
+# Remove redundant dataframes
+rm(mmadevn)
+rm(mmadrep)
+```
+
+
+```{r}
+# Recode the dataset, keep just used variables
+# Recode: 
+# part_violence becomes a dummy-variable (0 = no-violence; 1 = violence)
+# Replace missings with the value of zero
+
+mmad <- mmad %>%
+  mutate_if(is.numeric, as.integer) %>%
+  select(part_violence, sec_engagement, avg_numparticipants, numreports, max_partviolence, max_secengagement) %>%
+  filter(part_violence <= 3 | is.na(part_violence)) %>%
+  replace_na(list(part_violence = 0 , sec_engagement = 0, avg_numparticipants = 0, numreports = 0, max_secengagement = 0, max_partviolence = 0)) %>%
+  filter(max_secengagement <= 1) %>%
+  mutate(part_violence = replace(part_violence, part_violence == 2, 1)) %>%
+  mutate(part_violence = replace(part_violence, part_violence == 3, 1))
+```
+
+```{r}
+# Have a look on the datastructure -> count data = Poisson regression
+
+mmad %>%
+  mutate_if(is.numeric, as.integer) %>%
+  replace_na(list(part_violence = 0)) %>%
+  group_by(numreports, part_violence, avg_numparticipants) %>%
+  summarise() %>%
+  ggplot(aes(numreports)) +
+  geom_histogram(colour = "white", fill = "blue", binwidth = .5, position = "dodge")
+```
+
+
+```{r}
+# Have a look on the datastructure -> count data = Poisson regression
+
+dca %>%
+  mutate_if(is.numeric, as.integer) %>%
+  replace_na(list(viold = 0)) %>%
+  group_by(stories, viold, partices) %>%
+  summarise() %>%
+  ggplot(aes(stories)) +
+  geom_histogram(colour = "white", fill = "blue", binwidth = .5, position = "dodge")
+```
+
+
+
+Poisson regression with the peaceful dataset
+
+```{r}
+# Run the Poisson regression on the MMAD 
+
+poisson.mmad <- glm(numreports ~ part_violence + avg_numparticipants + sec_engagement + max_partviolence + max_partviolence + max_secengagement, 
+                    family="poisson", data=mmad)
+
+jtools::summ(poisson.mmad, exp = T)
+```
+
+
+```{r}
+# Testing for overdispersion
+
+dispersiontest(poisson.mmad, trafo = 1)
+```
+
+```{r}
+# Goodness of fit test
+
+with(poisson.mmad, cbind(res.deviance = deviance, df = df.residual,
+                    p = pchisq(deviance, df.residual, lower.tail = FALSE)))
+```
+
+
+
+
+Try Poisson regression with dca datset
+```{r}
+# Run the Poisson regression on the DCA dataset, incident ratio rate output
+
+poisson.dca <- glm(stories ~ viold + violtype + partices + propdam + police3 + police4 + counterd, family="poisson", data=dca)
+
+jtools::summ(poisson.dca, exp = T)
+```
+
+
+```{r}
+# Test for overdispersion
+
+dispersiontest(poisson.dca, trafo = 1)
+```
+
+
+```{r}
+# Goodness of fit test
+
+with(poisson.dca, cbind(res.deviance = deviance, df = df.residual,
+                    p = pchisq(deviance, df.residual, lower.tail = FALSE)))
+```
+
+
+
+
